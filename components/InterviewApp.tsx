@@ -132,6 +132,43 @@ function describeFetchFailure(err: unknown): string {
   return "Network request failed.";
 }
 
+function useIsMdUp() {
+  const [mdUp, setMdUp] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const apply = () => setMdUp(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return mdUp;
+}
+
+function HamburgerIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      {open ? (
+        <>
+          <path d="M18 6L6 18M6 6l12 12" />
+        </>
+      ) : (
+        <>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function InterviewApp() {
   const [state, setState] = useState<ProfilesState | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -148,8 +185,12 @@ export function InterviewApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"settings" | "history">("settings");
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadFileInputId = "ia-thread-file-input";
+  const isMdUp = useIsMdUp();
 
   useEffect(() => {
     setApiKey(localStorage.getItem("ia_api_key") ?? "");
@@ -194,7 +235,18 @@ export function InterviewApp() {
     setActiveChatId(null);
     setMessages([]);
     setThreadAttachments([]);
+    setEditingMessageIndex(null);
+    setEditDraft("");
   }, [active?.id]);
+
+  useEffect(() => {
+    setEditingMessageIndex(null);
+    setEditDraft("");
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (isMdUp) setMobileMenuOpen(false);
+  }, [isMdUp]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -435,35 +487,52 @@ export function InterviewApp() {
     setThreadAttachments(data.session.attachments ?? []);
   }
 
-  async function send() {
-    const text = input.trim();
-    const canSend = (text || pendingAttachments.length > 0) && active && !loading;
-    if (!canSend) return;
-    setInput("");
+  async function submitPrompt(
+    rawText: string,
+    opts?: {
+      rewindTo?: number;
+      attachmentRefs?: ChatMessage["attachments"];
+      clearComposer?: boolean;
+    }
+  ) {
+    const trimmed = rawText.trim();
+    const usePending = opts?.rewindTo === undefined;
+    const pendingSnap =
+      usePending && pendingAttachments.length > 0
+        ? pendingAttachments.map((a) => ({ id: a.id, fileName: a.fileName }))
+        : undefined;
+    const snap =
+      opts?.attachmentRefs && opts.attachmentRefs.length > 0
+        ? opts.attachmentRefs
+        : pendingSnap;
+
+    const userBubble =
+      trimmed ||
+      (snap?.length ? `[Thread files: ${snap.map((a) => a.fileName).join(", ")}]` : "");
+
+    if (!active || loading) return;
+    if (!userBubble) return;
+
     setError(null);
+    if (opts?.clearComposer) setInput("");
 
     let chatId = activeChatId;
     if (!chatId) {
+      if (opts?.rewindTo !== undefined) return;
       const session = await startNewChat();
       if (!session) return;
       chatId = session.id;
     }
 
-    const userBubble =
-      text ||
-      `[Thread files: ${pendingAttachments.map((a) => a.fileName).join(", ")}]`;
-
-    const snap =
-      pendingAttachments.length > 0
-        ? pendingAttachments.map((a) => ({ id: a.id, fileName: a.fileName }))
-        : undefined;
+    const optimisticBase =
+      opts?.rewindTo !== undefined ? messages.slice(0, opts.rewindTo) : messages;
 
     const optimistic: ChatMessage[] = [
-      ...messages,
+      ...optimisticBase,
       {
         role: "user",
         content: userBubble,
-        ...(snap ? { attachments: snap } : {}),
+        ...(snap?.length ? { attachments: snap } : {}),
       },
     ];
     setMessages(optimistic);
@@ -472,16 +541,19 @@ export function InterviewApp() {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey) headers["x-api-key"] = apiKey;
 
+    const payload: Record<string, unknown> = {
+      profileId: active.id,
+      chatId,
+      model,
+      mode,
+      userMessage: trimmed,
+    };
+    if (opts?.rewindTo !== undefined) payload.rewindBeforeSend = opts.rewindTo;
+
     const res = await fetch("/api/chat", {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        profileId: active.id,
-        chatId,
-        model,
-        mode,
-        userMessage: text,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const ct = res.headers.get("content-type") || "";
@@ -526,6 +598,25 @@ export function InterviewApp() {
     await refreshAllChats();
   }
 
+  async function send() {
+    const text = input.trim();
+    const canSend = (text || pendingAttachments.length > 0) && active && !loading;
+    if (!canSend) return;
+    await submitPrompt(input, { clearComposer: true });
+  }
+
+  async function resubmitFromEdit(index: number) {
+    const trimmed = editDraft.trim();
+    if (!trimmed) {
+      setError("Enter a question to send.");
+      return;
+    }
+    const attachmentRefs = messages[index]?.attachments;
+    setEditingMessageIndex(null);
+    setEditDraft("");
+    await submitPrompt(trimmed, { rewindTo: index, attachmentRefs });
+  }
+
   if (!state) {
     return (
       <div className="flex min-h-screen items-center justify-center text-[var(--muted)]">
@@ -534,87 +625,132 @@ export function InterviewApp() {
     );
   }
 
-  return (
-    <div className="mx-auto flex min-h-[100dvh] max-w-[1600px] flex-col-reverse gap-0 md:min-h-screen md:flex-row">
-      {/* Sidebar: below chat on small screens; use md:flex-row + DOM order for desktop */}
-      <aside className="relative z-10 flex max-h-[42vh] min-h-0 w-full shrink-0 flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--surface)] md:z-auto md:max-h-none md:w-[380px] md:border-t-0 md:border-r md:border-b-0">
-        <div className="border-b border-[var(--border)] p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h1 className="text-lg font-semibold tracking-tight">Interview Assist</h1>
-            <button
-              type="button"
-              onClick={() => void addProfile()}
-              className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
-            >
-              New person
-            </button>
-          </div>
-
-          <select
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--accent-dim)]"
-            value={active?.id ?? ""}
-            onChange={(e) => selectProfile(e.target.value)}
+  const sidebarBody = (
+    <>
+      <div className="border-b border-[var(--border)] p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold tracking-tight">Interview Assist</h1>
+          <button
+            type="button"
+            onClick={() => void addProfile()}
+            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
-            {state.profiles.length === 0 ? (
-              <option value="">No profiles — add one</option>
-            ) : (
-              state.profiles.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))
-            )}
-          </select>
+            New person
+          </button>
         </div>
 
-        {/* Sidebar tabs */}
-        {active && (
-          <>
-            <div className="flex border-b border-[var(--border)]">
-              {(["settings", "history"] as const).map((tab) => (
+        <select
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--accent-dim)]"
+          value={active?.id ?? ""}
+          onChange={(e) => selectProfile(e.target.value)}
+        >
+          {state.profiles.length === 0 ? (
+            <option value="">No profiles — add one</option>
+          ) : (
+            state.profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))
+          )}
+        </select>
+      </div>
+
+      {active && (
+        <>
+          <div className="flex border-b border-[var(--border)]">
+            {(["settings", "history"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setSidebarTab(tab)}
+                className={`flex-1 py-2.5 text-center text-xs font-semibold uppercase tracking-wider transition ${
+                  sidebarTab === tab
+                    ? "border-b-2 border-[var(--accent)] text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                {tab === "settings" ? "Settings" : `History (${totalChats})`}
+              </button>
+            ))}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {sidebarTab === "settings" ? (
+              <SettingsPanel
+                active={active}
+                models={models}
+                model={model}
+                setModel={setModel}
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+                patchProfile={patchProfile}
+                upload={upload}
+                deleteProfile={deleteProfile}
+              />
+            ) : (
+              <HistoryPanel
+                allChats={allChats}
+                activeProfileId={active.id}
+                activeChatId={activeChatId}
+                loadChat={loadChat}
+                deleteChat={deleteChat}
+                startNewChat={startNewChat}
+              />
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  return (
+    <div className="relative mx-auto flex min-h-[100dvh] max-w-[1600px] flex-col md:min-h-screen md:flex-row">
+      {isMdUp ? (
+        <aside className="relative z-10 flex min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface)]">
+          {sidebarBody}
+        </aside>
+      ) : (
+        <>
+          {mobileMenuOpen && (
+            <button
+              type="button"
+              aria-label="Close settings"
+              className="fixed inset-0 z-30 bg-black/45"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+          )}
+          <div className="group/flyout fixed left-0 top-0 z-40 flex h-dvh md:hidden">
+            <div className="flex h-full min-h-0">
+              <div className="flex w-11 shrink-0 flex-col items-center border-r border-[var(--border)] bg-[var(--bg)] pt-3">
                 <button
-                  key={tab}
                   type="button"
-                  onClick={() => setSidebarTab(tab)}
-                  className={`flex-1 py-2.5 text-center text-xs font-semibold uppercase tracking-wider transition ${
-                    sidebarTab === tab
-                      ? "border-b-2 border-[var(--accent)] text-[var(--accent)]"
-                      : "text-[var(--muted)] hover:text-[var(--text)]"
-                  }`}
+                  aria-label={mobileMenuOpen ? "Close profiles and settings" : "Open profiles and settings"}
+                  aria-expanded={mobileMenuOpen}
+                  title="Profiles, settings & history — hover to peek, tap to pin"
+                  onClick={() => setMobileMenuOpen((o) => !o)}
+                  className="rounded-lg p-2 text-[var(--text)] hover:bg-[var(--border)]/60"
                 >
-                  {tab === "settings" ? "Settings" : `History (${totalChats})`}
+                  <HamburgerIcon open={mobileMenuOpen} />
                 </button>
-              ))}
+              </div>
+              <aside
+                className={`h-full max-h-dvh min-h-0 overflow-hidden border-r border-[var(--border)] bg-[var(--surface)] shadow-[6px_0_32px_rgba(0,0,0,0.5)] transition-[max-width] duration-200 ease-out ${
+                  mobileMenuOpen
+                    ? "max-w-[min(380px,calc(100vw-2.75rem))]"
+                    : "max-w-0 group-hover/flyout:max-w-[min(380px,calc(100vw-2.75rem))]"
+                }`}
+              >
+                <div className="flex h-full min-h-0 w-[min(380px,calc(100vw-2.75rem))] flex-col overflow-hidden">
+                  {sidebarBody}
+                </div>
+              </aside>
             </div>
+          </div>
+        </>
+      )}
 
-            <div className="flex-1 overflow-y-auto p-4">
-              {sidebarTab === "settings" ? (
-                <SettingsPanel
-                  active={active}
-                  models={models}
-                  model={model}
-                  setModel={setModel}
-                  apiKey={apiKey}
-                  setApiKey={setApiKey}
-                  patchProfile={patchProfile}
-                  upload={upload}
-                  deleteProfile={deleteProfile}
-                />
-              ) : (
-                <HistoryPanel
-                  allChats={allChats}
-                  activeProfileId={active.id}
-                  activeChatId={activeChatId}
-                  loadChat={loadChat}
-                  deleteChat={deleteChat}
-                  startNewChat={startNewChat}
-                />
-              )}
-            </div>
-          </>
-        )}
-      </aside>
-
-      {/* Main chat area — first on narrow viewports (flex-col-reverse) */}
-      <main className="flex min-h-0 flex-1 flex-col md:min-h-[60vh]">
+      <main className="flex min-h-0 flex-1 flex-col pl-11 md:min-h-[60vh] md:pl-0">
         <header className="border-b border-[var(--border)] px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-[var(--muted)]">Answer style</span>
@@ -724,10 +860,54 @@ export function InterviewApp() {
                       ))}
                     </div>
                   )}
-                {m.role === "assistant" && (mode === "coding" || mode === "system_design") ? (
+                {m.role === "assistant" ? (
                   <MarkdownMessage content={m.content} />
+                ) : editingMessageIndex === i ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editDraft}
+                      onChange={(e) => setEditDraft(e.target.value)}
+                      className="min-h-[100px] w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:ring-2 focus:ring-[var(--accent-dim)]"
+                      disabled={loading}
+                      aria-label="Edit your message"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={loading || !editDraft.trim()}
+                        onClick={() => void resubmitFromEdit(i)}
+                        className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-40"
+                      >
+                        Resubmit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          setEditingMessageIndex(null);
+                          setEditDraft("");
+                        }}
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--muted)] hover:border-[var(--accent-dim)] hover:text-[var(--text)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  <div>
+                    <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                    <button
+                      type="button"
+                      disabled={loading || editingMessageIndex !== null}
+                      onClick={() => {
+                        setEditingMessageIndex(i);
+                        setEditDraft(m.content);
+                      }}
+                      className="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--muted)] hover:border-[var(--accent-dim)] hover:text-[var(--text)] disabled:opacity-40"
+                    >
+                      Edit &amp; resubmit
+                    </button>
+                  </div>
                 )}
               </div>
             ))

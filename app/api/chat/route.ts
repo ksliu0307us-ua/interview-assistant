@@ -79,6 +79,26 @@ export async function POST(req: Request) {
     });
   }
 
+  const rawRewind = (body as { rewindBeforeSend?: unknown }).rewindBeforeSend;
+  if (
+    typeof rawRewind === "number" &&
+    Number.isInteger(rawRewind) &&
+    rawRewind >= 0
+  ) {
+    const cut = Math.min(rawRewind, session.messages.length);
+    session.messages = session.messages.slice(0, cut);
+    session.attachments = session.attachments.map((a) => {
+      const idx = a.linkedUserMessageIndex;
+      if (typeof idx === "number" && idx >= cut) {
+        const rest = { ...a };
+        delete rest.linkedUserMessageIndex;
+        return rest;
+      }
+      return a;
+    });
+    await saveChat(session);
+  }
+
   const hasThreadFiles = (session.attachments?.length ?? 0) > 0;
   if (!trimmedUser && !hasThreadFiles) {
     return new Response(

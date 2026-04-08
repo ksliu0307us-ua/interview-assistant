@@ -94,7 +94,14 @@ MODE: Live coding / whiteboard
     `
 
 MODE: System design
-- Start with a Mermaid diagram in a fenced block: \`\`\`mermaid ... \`\`\` showing main components and data flow.
+- Start with ONE Mermaid diagram in a fenced block: \`\`\`mermaid ... \`\`\` showing main components and data flow.
+- The diagram MUST be valid Mermaid 10+ syntax or the in-app viewer will fail. Follow these rules exactly:
+  • First non-empty line is the diagram type, e.g. \`flowchart TB\` or \`flowchart LR\` (prefer \`flowchart\` over legacy \`graph\`).
+  • Node IDs: use only letters, digits, and underscores (e.g. lb, app, db). No spaces or punctuation in IDs.
+  • Any label with spaces, commas, parentheses, or special characters MUST be in double quotes: lb["Load balancer"] --> app["App tier"].
+  • Do not put markdown, HTML, or nested \`\`\` fences inside the mermaid block.
+  • Close every \`subgraph\` with a matching \`end\` on its own line.
+  • Keep labels short; avoid raw \`"\` inside a quoted label (use single words or rephrase).
 - Then a continuous first-person verbal explanation: tradeoffs, pros/cons, alternatives — as the candidate at the whiteboard.
 - Tie to systems or scale mentioned in the documents when possible.
 - No markdown headings; short paragraphs or sentences only.
