@@ -94,11 +94,27 @@ function ChatAttachmentTile({
   );
 }
 
-async function readErrorBody(res: Response): Promise<string> {
+/** Avoid calling .json() when the server returned HTML (redirect page, error document, etc.). */
+async function tryParseJson<T>(res: Response): Promise<T | null> {
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) return null;
   try {
-    const j = await res.json();
-    if (j && typeof j.error === "string") return j.error;
-  } catch { /* ignore */ }
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function readErrorBody(res: Response): Promise<string> {
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct.includes("application/json")) {
+    try {
+      const j = await res.json();
+      if (j && typeof j.error === "string") return j.error;
+    } catch {
+      /* ignore */
+    }
+  }
   return res.statusText || "Request failed";
 }
 
@@ -188,6 +204,7 @@ export function InterviewApp() {
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadFileInputId = "ia-thread-file-input";
   const isMdUp = useIsMdUp();
@@ -197,12 +214,49 @@ export function InterviewApp() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [pRes, mRes] = await Promise.all([fetch("/api/profiles"), fetch("/api/models")]);
-    const p = (await pRes.json()) as ProfilesState;
-    setState(p);
-    const m = (await mRes.json()) as { models: string[]; defaultModel: string };
-    setModels(m.models);
-    setModel((prev) => (prev && m.models.includes(prev) ? prev : m.defaultModel));
+    setBootstrapError(null);
+    try {
+      const [pRes, mRes] = await Promise.all([
+        fetch("/api/profiles", { credentials: "same-origin" }),
+        fetch("/api/models", { credentials: "same-origin" }),
+      ]);
+      if (pRes.status === 401 || mRes.status === 401) {
+        window.location.assign(
+          `/signin?callbackUrl=${encodeURIComponent(window.location.pathname + window.location.search)}`
+        );
+        return;
+      }
+      if (!pRes.ok) {
+        setError(await readErrorBody(pRes));
+        setState((prev) => prev ?? { profiles: [], activeProfileId: null });
+        return;
+      }
+      if (!mRes.ok) {
+        setError(await readErrorBody(mRes));
+        const pOnly = await tryParseJson<ProfilesState>(pRes);
+        if (pOnly) setState(pOnly);
+        else setState((prev) => prev ?? { profiles: [], activeProfileId: null });
+        return;
+      }
+      const p = await tryParseJson<ProfilesState>(pRes);
+      const m = await tryParseJson<{ models: string[]; defaultModel: string }>(mRes);
+      if (!p || !m) {
+        const msg =
+          "Could not load profiles or models (the server returned a non-JSON page). Try signing in again or refreshing.";
+        setBootstrapError(msg);
+        setError(msg);
+        setState((prev) => prev ?? { profiles: [], activeProfileId: null });
+        return;
+      }
+      setState(p);
+      setModels(m.models);
+      setModel((prev) => (prev && m.models.includes(prev) ? prev : m.defaultModel));
+    } catch (e) {
+      const msg = describeFetchFailure(e);
+      setBootstrapError(msg);
+      setError(msg);
+      setState((prev) => prev ?? { profiles: [], activeProfileId: null });
+    }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -619,8 +673,24 @@ export function InterviewApp() {
 
   if (!state) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-[var(--muted)]">
-        Loading…
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center text-[var(--muted)]">
+        {bootstrapError ? (
+          <>
+            <p className="max-w-md text-sm text-red-200">{bootstrapError}</p>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Retry
+            </button>
+            <a href="/signin" className="text-sm text-[var(--accent)] hover:underline">
+              Go to sign in
+            </a>
+          </>
+        ) : (
+          <span>Loading…</span>
+        )}
       </div>
     );
   }
@@ -705,13 +775,13 @@ export function InterviewApp() {
   );
 
   return (
-    <div className="relative mx-auto flex min-h-[100dvh] max-w-[1600px] flex-col md:min-h-screen md:flex-row">
+    <div className="relative mx-auto flex h-dvh max-h-dvh min-h-0 max-w-[1600px] flex-col md:flex-row">
       {isMdUp ? (
-        <aside className="relative z-10 flex min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface)]">
+        <aside className="relative z-10 flex h-dvh max-h-dvh min-h-0 w-[380px] shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface)]">
           {sidebarBody}
         </aside>
       ) : (
-        <>
+        <div className="contents">
           {mobileMenuOpen && (
             <button
               type="button"
@@ -747,11 +817,11 @@ export function InterviewApp() {
               </aside>
             </div>
           </div>
-        </>
+        </div>
       )}
 
-      <main className="flex min-h-0 flex-1 flex-col pl-11 md:min-h-[60vh] md:pl-0">
-        <header className="border-b border-[var(--border)] px-4 py-3">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden pl-11 md:h-dvh md:pl-0">
+        <header className="shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-[var(--muted)]">Answer style</span>
             <div className="flex flex-wrap gap-2">
@@ -804,7 +874,7 @@ export function InterviewApp() {
           )}
         </header>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4">
           {!active ? (
             <p className="text-[var(--muted)]">Create a person profile to begin.</p>
           ) : messages.length === 0 ? (
@@ -918,7 +988,7 @@ export function InterviewApp() {
           <div ref={bottomRef} />
         </div>
 
-        <footer className="border-t border-[var(--border)] p-4">
+        <footer className="shrink-0 border-t border-[var(--border)] bg-[var(--bg)] p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
           <div
             className={`mx-auto max-w-3xl space-y-2 rounded-xl transition-colors ${
               dragOverComposer ? "bg-[var(--accent-dim)]/15 ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--bg)]" : ""
