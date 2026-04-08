@@ -1,0 +1,9 @@
+I want to build an web application which helps me with my interview..
+The main roles include Full Stack, Front End, Backend, Software Engineer, AI/ML Engineer, Data Scientist, GenAI Engineer, Data Engineer roles
+This agent should have the capability to upload files for refernece and an option to upload resume, Job description and and option to select the phase of the interview 
+Also it needs to have the ability to assist several people not only one person. so there is an option to switch between people registered. and for each person's profile we can upload resume and some supporting docs.
+and user can give custom prompts
+And importantly it shoud give 100% verbal answers for the interview questions and give the answers only
+And for coding rounds, it should provide comments for every line of the code so the interviewer can explain the code while typing.
+And for system design need to give the design diagram and the explanation and why this design and what's the pros and cons and other options in verbal form
+And there should be an option to switch between models.
