@@ -204,6 +204,7 @@ export function InterviewApp() {
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [answerStyleMenuOpen, setAnswerStyleMenuOpen] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadFileInputId = "ia-thread-file-input";
@@ -300,6 +301,10 @@ export function InterviewApp() {
 
   useEffect(() => {
     if (isMdUp) setMobileMenuOpen(false);
+  }, [isMdUp]);
+
+  useEffect(() => {
+    if (isMdUp) setAnswerStyleMenuOpen(false);
   }, [isMdUp]);
 
   useEffect(() => {
@@ -822,9 +827,29 @@ export function InterviewApp() {
 
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden pl-11 md:h-dvh md:pl-0">
         <header className="shrink-0 border-b border-[var(--border)] px-4 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm text-[var(--muted)]">Answer style</span>
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <button
+              type="button"
+              aria-expanded={answerStyleMenuOpen}
+              aria-controls="ia-answer-style-panel"
+              onClick={() => setAnswerStyleMenuOpen((o) => !o)}
+              className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-left text-sm text-[var(--text)] hover:border-[var(--accent-dim)] md:hidden"
+            >
+              <span className="text-[var(--muted)]">Answer style</span>
+              <span className="font-medium text-[var(--accent)]">
+                {mode === "verbal"
+                  ? "Verbal Q&A"
+                  : mode === "coding"
+                    ? "Coding"
+                    : "System design"}
+              </span>
+              <span className="text-[10px] text-[var(--muted)]" aria-hidden>
+                {answerStyleMenuOpen ? "▲" : "▼"}
+              </span>
+            </button>
+
+            <span className="hidden text-sm text-[var(--muted)] md:inline">Answer style</span>
+            <div className="hidden flex-wrap gap-2 md:flex">
               {([
                 ["verbal", "Verbal Q&A"],
                 ["coding", "Coding (line comments)"],
@@ -844,6 +869,7 @@ export function InterviewApp() {
                 </button>
               ))}
             </div>
+
             <div className="ml-auto flex flex-wrap items-center gap-2">
               {activeChatId && (
                 <>
@@ -867,6 +893,37 @@ export function InterviewApp() {
               )}
             </div>
           </div>
+
+          {answerStyleMenuOpen && (
+            <div
+              id="ia-answer-style-panel"
+              className="mt-3 flex flex-wrap gap-2 border-t border-[var(--border)] pt-3 md:hidden"
+              role="group"
+              aria-label="Choose answer style"
+            >
+              {([
+                ["verbal", "Verbal Q&A"],
+                ["coding", "Coding (line comments)"],
+                ["system_design", "System design"],
+              ] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setMode(k);
+                    setAnswerStyleMenuOpen(false);
+                  }}
+                  className={`rounded-full px-3 py-1 text-sm transition ${
+                    mode === k
+                      ? "bg-[var(--accent)] text-white"
+                      : "border border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent-dim)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {error && (
             <p className="mt-2 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-200">
               {error}
@@ -1045,23 +1102,24 @@ export function InterviewApp() {
                 multiple
                 tabIndex={-1}
                 accept="*/*"
-                aria-label="Attach files to this chat"
                 onChange={(e) => void onThreadFilesPicked(e)}
               />
               {active && !loading ? (
                 <label
                   htmlFor={threadFileInputId}
                   title="Attach images, documents, code, spreadsheets, or zip"
-                  className="inline-flex cursor-pointer select-none items-center self-end rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] hover:border-[var(--accent-dim)]"
+                  aria-label="Attach files to this chat"
+                  className="inline-flex cursor-pointer select-none items-center justify-center self-end rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xl leading-none text-[var(--text)] hover:border-[var(--accent-dim)]"
                 >
-                  Attach
+                  📎
                 </label>
               ) : (
                 <span
-                  className="inline-flex select-none items-center self-end rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] opacity-40"
+                  className="inline-flex select-none items-center justify-center self-end rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xl leading-none text-[var(--text)] opacity-40"
                   title={!active ? "Add a profile first" : "Wait for the reply to finish"}
+                  aria-hidden
                 >
-                  Attach
+                  📎
                 </span>
               )}
               <textarea

@@ -16,3 +16,38 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
     "Helvetica Neue", Arial, sans-serif;
 }
+
+/* Slim, theme-aware scrollbars (Firefox + Chromium / Safari / Edge) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-dim) rgba(20, 24, 32, 0.35);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(20, 24, 32, 0.45);
+  border-radius: 100px;
+  margin: 2px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3d4d66 0%, var(--accent-dim) 100%);
+  border-radius: 100px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.12);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--accent-dim) 0%, var(--accent) 100%);
+  background-clip: padding-box;
+  box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.28);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
