@@ -207,6 +207,9 @@ export function InterviewApp() {
   const [answerStyleMenuOpen, setAnswerStyleMenuOpen] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const streamingAssistantRef = useRef<HTMLDivElement | null>(null);
+  const streamingAlignDoneRef = useRef(false);
+  const prevLoadingRef = useRef(false);
   const threadFileInputId = "ia-thread-file-input";
   const isMdUp = useIsMdUp();
 
@@ -308,6 +311,30 @@ export function InterviewApp() {
   }, [isMdUp]);
 
   useEffect(() => {
+    const wasLoading = prevLoadingRef.current;
+    prevLoadingRef.current = loading;
+
+    if (loading) {
+      const last = messages[messages.length - 1];
+      if (last?.role === "assistant" && !streamingAlignDoneRef.current) {
+        const id = requestAnimationFrame(() => {
+          const el = streamingAssistantRef.current;
+          if (el) {
+            el.scrollIntoView({ block: "start", behavior: "auto" });
+            streamingAlignDoneRef.current = true;
+          }
+        });
+        return () => cancelAnimationFrame(id);
+      }
+      return;
+    }
+
+    streamingAlignDoneRef.current = false;
+
+    if (wasLoading && messages[messages.length - 1]?.role === "assistant") {
+      return;
+    }
+
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
@@ -959,10 +986,15 @@ export function InterviewApp() {
             messages.map((m, i) => (
               <div
                 key={i}
+                ref={
+                  m.role === "assistant" && i === messages.length - 1
+                    ? streamingAssistantRef
+                    : undefined
+                }
                 className={`max-w-3xl rounded-xl border px-4 py-3 ${
                   m.role === "user"
                     ? "ml-auto border-[var(--accent-dim)]/40 bg-[var(--accent-dim)]/10"
-                    : "border-[var(--border)] bg-[var(--surface)]"
+                    : `border-[var(--border)] bg-[var(--surface)]${loading && i === messages.length - 1 ? " scroll-mt-3" : ""}`
                 }`}
               >
                 <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
